@@ -1,190 +1,231 @@
 import streamlit as st
-import os
-import tempfile
-from food_detector import FoodDetector
-from billing_calculator import BillingCalculator
 import config
-from PIL import Image
-import cv2
-import numpy as np
+from billing_calculator import BillingCalculator
 
 # Cấu hình trang
 st.set_page_config(
-    page_title=config.PAGE_TITLE,
-    page_icon=config.PAGE_ICON if config.PAGE_ICON else None,
-    layout="centered"
+    page_title="Food Billing System",
+    page_icon="🍽️",
+    layout="wide"
 )
 
-# CSS tùy chỉnh để giao diện tối giản
+# CSS tùy chỉnh
 st.markdown("""
     <style>
-        .main-header {
-            text-align: center;
-            padding: 20px;
-            border-bottom: 1px solid #e0e0e0;
+        .stApp {
+            background-color: #f5f5f5;
         }
-        .bill-item {
-            padding: 10px;
-            border-bottom: 1px solid #f0f0f0;
+        .main-header {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .bill-card {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 10px 0;
         }
         .total-amount {
-            font-size: 24px;
+            font-size: 28px;
             font-weight: bold;
             color: #2e7d32;
             text-align: right;
-            padding: 20px;
+            padding: 15px;
             border-top: 2px solid #2e7d32;
+            margin-top: 10px;
+        }
+        .food-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .item-name {
+            font-weight: 500;
+        }
+        .item-price {
+            color: #1a73e8;
+        }
+        .note-text {
+            color: #757575;
+            font-size: 12px;
+            font-style: italic;
         }
         .stButton button {
             width: 100%;
+            border-radius: 8px;
         }
-        .detection-result {
+        .quantity-input {
+            max-width: 80px;
+        }
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
             margin: 10px 0;
-            padding: 10px;
+        }
+        .menu-item {
+            background-color: white;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .menu-item:hover {
+            border-color: #1a73e8;
+            box-shadow: 0 2px 8px rgba(26,115,232,0.2);
+        }
+        .menu-item.selected {
+            border-color: #1a73e8;
+            background-color: #e8f0fe;
+        }
+        .bill-header {
             background-color: #f8f9fa;
-            border-radius: 5px;
-        }
-        .food-name {
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
             font-weight: bold;
-            text-transform: capitalize;
-        }
-        .price {
-            color: #1a73e8;
-        }
-        .note {
-            color: #757575;
-            font-size: 12px;
         }
     </style>
 """, unsafe_allow_html=True)
 
-def initialize_session_state():
+def init_session_state():
     """Khởi tạo session state"""
-    if 'detector' not in st.session_state:
-        st.session_state.detector = FoodDetector()
     if 'calculator' not in st.session_state:
         st.session_state.calculator = BillingCalculator()
-    if 'detected_foods' not in st.session_state:
-        st.session_state.detected_foods = []
-    if 'bill_details' not in st.session_state:
-        st.session_state.bill_details = None
+    if 'selected_food' not in st.session_state:
+        st.session_state.selected_food = None
 
-def process_image(image_file):
-    """Xử lý ảnh và phát hiện món ăn"""
-    try:
-        # Lưu ảnh tạm thời
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-            tmp_file.write(image_file.getvalue())
-            temp_path = tmp_file.name
-        
-        # Phát hiện món ăn
-        detector = st.session_state.detector
-        detected_foods = detector.detect_foods(temp_path)
-        
-        # Xóa file tạm
-        os.unlink(temp_path)
-        
-        return detected_foods
-    
-    except Exception as e:
-        st.error(f"Loi xu ly anh: {str(e)}")
-        return []
+def add_food_to_bill(food_name):
+    """Thêm món ăn vào hóa đơn"""
+    calculator = st.session_state.calculator
+    calculator.add_item(food_name)
+    st.session_state.selected_food = None
+    st.rerun()
 
-def display_bill(bill_details):
+def display_bill():
     """Hiển thị hóa đơn"""
-    if not bill_details or not bill_details['items']:
-        st.info("Khong phat hien mon an nao trong anh")
+    calculator = st.session_state.calculator
+    bill_details = calculator.get_bill_details()
+    
+    if not bill_details['items']:
+        st.info("Chưa có món ăn nào trong hóa đơn")
         return
     
-    st.subheader("Hoa don")
+    # Header hóa đơn
+    st.markdown("""
+        <div class="bill-header">
+            <span>Món ăn</span>
+            <span style="margin-left: auto; padding-right: 20px;">Số lượng</span>
+            <span style="padding-right: 20px;">Đơn giá</span>
+            <span>Thành tiền</span>
+        </div>
+    """, unsafe_allow_html=True)
     
     # Hiển thị từng món
-    for item in bill_details['items']:
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 2])
+    for idx, item in enumerate(bill_details['items']):
+        col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1.5, 0.5])
+        
         with col1:
-            st.markdown(f'<span class="food-name">{item["name"]}</span>', unsafe_allow_html=True)
+            st.markdown(f"**{item['name']}**")
             if item.get('note'):
-                st.markdown(f'<span class="note">{item["note"]}</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="note-text">{item["note"]}</span>', unsafe_allow_html=True)
+        
         with col2:
-            st.write(f"{item['count']}")
+            # Input số lượng
+            new_qty = st.number_input(
+                "",
+                min_value=1,
+                max_value=99,
+                value=item['quantity'],
+                key=f"qty_{idx}",
+                label_visibility="collapsed"
+            )
+            if new_qty != item['quantity']:
+                calculator.update_quantity(idx, new_qty)
+                st.rerun()
+        
         with col3:
-            st.write(f"{item['price']:,}")
+            st.markdown(f'<span class="item-price">{item["price"]:,}đ</span>', unsafe_allow_html=True)
+        
         with col4:
-            st.write(f"{item['subtotal']:,}")
+            st.markdown(f'**{item["subtotal"]:,}đ**')
+        
+        with col5:
+            if st.button("×", key=f"del_{idx}", use_container_width=True):
+                calculator.remove_item(idx)
+                st.rerun()
     
     # Tổng tiền
     st.markdown(f"""
         <div class="total-amount">
-            Tong cong: {bill_details['total']:,} VND
+            Tổng cộng: {bill_details['total']:,} VND
         </div>
     """, unsafe_allow_html=True)
+    
+    # Nút xóa hóa đơn
+    if st.button("Xóa hóa đơn", type="secondary", use_container_width=True):
+        calculator.clear_bill()
+        st.rerun()
 
 def main():
-    initialize_session_state()
+    init_session_state()
     
     # Header
-    st.markdown('<div class="main-header"><h1>Food Billing System</h1></div>', unsafe_allow_html=True)
+    st.markdown("""
+        <div class="main-header">
+            <h1 style="margin: 0; color: #1a73e8;">🍽️ Food Billing System</h1>
+            <p style="margin: 5px 0 0 0; color: #666;">Tính tiền món ăn tự động</p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    # Sidebar - Hướng dẫn
-    with st.sidebar:
-        st.subheader("Huong dan")
-        st.write("1. Tai anh mon an len")
-        st.write("2. He thong se tu dong phat hien")
-        st.write("3. Xem hoa don duoc tao")
-        st.write("---")
-        st.write("Mon an ho tro:")
-        for food in config.FOOD_PRICES.keys():
-            price = config.FOOD_PRICES[food]
-            st.write(f"- {food.title()}: {price:,} VND")
+    # Layout chính
+    col_left, col_right = st.columns([2, 1])
     
-    # Main content
-    tab1, tab2 = st.tabs(["Tai anh", "Hoa don"])
-    
-    with tab1:
-        # Upload file
-        uploaded_file = st.file_uploader(
-            "Chon anh mon an",
-            type=['jpg', 'jpeg', 'png'],
-            help="Tai anh len de he thong tu dong phat hien mon an"
-        )
+    with col_left:
+        st.subheader("📋 Thực đơn")
         
-        if uploaded_file is not None:
-            # Hiển thị ảnh
-            image = Image.open(uploaded_file)
-            st.image(image, caption='Anh da tai', use_column_width=True)
-            
-            # Nút phát hiện
-            if st.button("Phat hien mon an", type="primary"):
-                with st.spinner("Dang phan tich anh..."):
-                    detected_foods = process_image(uploaded_file)
-                    
-                    if detected_foods:
-                        st.session_state.detected_foods = detected_foods
-                        calculator = st.session_state.calculator
-                        bill_details = calculator.calculate_bill(detected_foods)
-                        st.session_state.bill_details = bill_details
-                        
-                        st.success(f"Da phat hien {len(detected_foods)} mon an")
-                        
-                        # Hiển thị kết quả tạm thời
-                        st.markdown("**Mon an phat hien:**")
-                        for food in detected_foods:
+        # Hiển thị menu dạng grid
+        menu_items = list(config.FOOD_MENU.items())
+        cols_per_row = 3
+        
+        for i in range(0, len(menu_items), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j in range(cols_per_row):
+                if i + j < len(menu_items):
+                    food_name, food_info = menu_items[i + j]
+                    with cols[j]:
+                        with st.container():
                             st.markdown(f"""
-                                <div class="detection-result">
-                                    <span class="food-name">{food['name']}</span>
-                                    <span class="price">- {food['price']:,} VND</span>
-                                    {f'<span class="note">({food["note"]})</span>' if food.get('note') else ''}
+                                <div class="menu-item">
+                                    <div style="font-weight: 500;">{food_name}</div>
+                                    <div style="color: #1a73e8; font-weight: bold;">{food_info['price']:,}đ</div>
+                                    <div style="font-size: 11px; color: #666;">{food_info['note']}</div>
                                 </div>
                             """, unsafe_allow_html=True)
-                    else:
-                        st.warning("Khong phat hien mon an nao. Vui long thu lai voi anh khac.")
+                            
+                            if st.button(f"Thêm", key=f"add_{food_name}", use_container_width=True):
+                                add_food_to_bill(food_name)
     
-    with tab2:
-        # Hiển thị hóa đơn
-        if st.session_state.bill_details:
-            display_bill(st.session_state.bill_details)
-        else:
-            st.info("Chua co hoa don. Hay tai anh va phat hien mon an truoc.")
+    with col_right:
+        st.subheader("🧾 Hóa đơn")
+        display_bill()
+        
+        # Thêm thông tin
+        with st.expander("ℹ️ Hướng dẫn"):
+            st.write("""
+                1. Chọn món ăn từ thực đơn bên trái
+                2. Món ăn sẽ tự động thêm vào hóa đơn
+                3. Điều chỉnh số lượng nếu cần
+                4. Xem tổng tiền tự động tính
+            """)
 
 if __name__ == "__main__":
     main()
